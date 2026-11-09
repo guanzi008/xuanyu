@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,7 +52,7 @@ func TestRenderServiceUnit(t *testing.T) {
 	unit := renderServiceUnit(testInstallOptions())
 	for _, expected := range []string{
 		`ExecStart="/opt/headscale-console/headscale-console" "--config" "/etc/headscale-console/config.yaml" "--data-dir" "/var/lib/headscale-console"`,
-		`User=headscale-console`,
+		`User=root`,
 		`ProtectSystem=strict`,
 		`ReadWritePaths=/var/lib/headscale-console`,
 		`Restart=on-failure`,
@@ -58,6 +60,21 @@ func TestRenderServiceUnit(t *testing.T) {
 		if !strings.Contains(unit, expected) {
 			t.Fatalf("unit missing %q:\n%s", expected, unit)
 		}
+	}
+}
+
+func TestResolveBinaryPathMakesRelativePathAbsolute(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveBinaryPath("./headscale-console")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(cwd, "headscale-console")
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 

@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -21,8 +20,6 @@ import (
 const (
 	serviceName            = "headscale-console"
 	serviceUnit            = serviceName + ".service"
-	serviceUser            = "headscale-console"
-	serviceGroup           = "headscale-console"
 	installDir             = "/opt/headscale-console"
 	installedBinary        = installDir + "/headscale-console"
 	unitPath               = "/etc/systemd/system/" + serviceUnit
@@ -120,7 +117,11 @@ func installCommand(args []string) error {
 	if options.binaryPath == "" {
 		return errors.New("找不到 headscale-console 二进制；请使用 -binary 指定")
 	}
-	options.binaryPath = filepath.Clean(options.binaryPath)
+	resolvedBinaryPath, err := resolveBinaryPath(options.binaryPath)
+	if err != nil {
+		return err
+	}
+	options.binaryPath = resolvedBinaryPath
 	options.dataDir = filepath.Clean(options.dataDir)
 	options.configPath = filepath.Clean(options.configPath)
 	if options.baseURL == "" && options.domain == "" {
@@ -168,17 +169,13 @@ func installCommand(args []string) error {
 	if err := requireSystemd(); err != nil {
 		return err
 	}
-	uid, gid, err := ensureServiceUser(options.dataDir)
-	if err != nil {
-		return err
-	}
 	if err := ensureDirectory(installDir, 0o755, 0, 0); err != nil {
 		return err
 	}
-	if err := ensureDirectory(options.dataDir, 0o700, uid, gid); err != nil {
+	if err := ensureDirectory(options.dataDir, 0o700, 0, 0); err != nil {
 		return err
 	}
-	if err := ensureConfigParent(options.configPath, gid); err != nil {
+	if err := ensureConfigParent(options.configPath); err != nil {
 		return err
 	}
 	if err := installBinary(options.binaryPath); err != nil {
@@ -189,9 +186,6 @@ func installCommand(args []string) error {
 	if !configExists || options.forceConfig {
 		if err := writeAtomic(options.configPath, []byte(configYAML), 0o640); err != nil {
 			return fmt.Errorf("写入配置文件: %w", err)
-		}
-		if err := os.Chown(options.configPath, 0, gid); err != nil {
-			return fmt.Errorf("设置配置文件属组: %w", err)
 		}
 		if configExists {
 			fmt.Printf("已覆盖配置文件: %s\n", options.configPath)
@@ -262,7 +256,7 @@ func uninstallCommand(args []string) error {
 			fmt.Printf("  删除 %s\n", *configPath)
 			fmt.Printf("  删除 %s\n", *dataDir)
 		} else {
-			fmt.Println("  保留配置、数据和服务系统用户")
+			fmt.Println("  保留配置和数据")
 		}
 		return nil
 	}
@@ -305,7 +299,6 @@ func uninstallCommand(args []string) error {
 		fmt.Printf("已保留数据目录: %s\n", *dataDir)
 		fmt.Println("如需彻底删除，请运行: xuanyu uninstall -purge")
 	}
-	fmt.Printf("服务系统用户 %s 未删除，如有需要可手动执行 userdel %s\n", serviceUser, serviceUser)
 	return nil
 }
 
@@ -615,9 +608,9 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=%s
-Group=%s
-		WorkingDirectory=%s
+User=root
+Group=root
+WorkingDirectory=%s
 ExecStart=%s
 Restart=on-failure
 RestartSec=5s
@@ -645,7 +638,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
-`, serviceUser, serviceGroup, options.dataDir, strings.Join(quoted, " "), options.dataDir)
+`, options.dataDir, strings.Join(quoted, " "), options.dataDir)
 }
 
 func yamlQuote(value string) string {
@@ -691,6 +684,14 @@ func findDefaultBinary() string {
 		}
 	}
 	return ""
+}
+
+func resolveBinaryPath(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("解析二进制路径 %s: %w", path, err)
+	}
+	return filepath.Clean(absolute), nil
 }
 
 func verifyBinary(path string) error {
@@ -743,42 +744,6 @@ func systemdRunning() bool {
 	return err == nil && info.IsDir()
 }
 
-func ensureServiceUser(homeDir string) (int, int, error) {
-	group, err := user.LookupGroup(serviceGroup)
-	if err != nil {
-		if err := runCommand("groupadd", "--system", serviceGroup); err != nil {
-			return 0, 0, err
-		}
-		group, err = user.LookupGroup(serviceGroup)
-		if err != nil {
-			return 0, 0, fmt.Errorf("创建系统组后仍无法查询 %s: %w", serviceGroup, err)
-		}
-	}
-
-	account, err := user.Lookup(serviceUser)
-	if err != nil {
-		if err := runCommand("useradd", "--system", "--gid", serviceGroup, "--home-dir", homeDir, "--no-create-home", "--shell", "/usr/sbin/nologin", serviceUser); err != nil {
-			return 0, 0, err
-		}
-		account, err = user.Lookup(serviceUser)
-		if err != nil {
-			return 0, 0, fmt.Errorf("创建系统用户后仍无法查询 %s: %w", serviceUser, err)
-		}
-	} else {
-		_ = runCommandQuiet("usermod", "--append", "--groups", serviceGroup, serviceUser)
-	}
-
-	uid, err := strconv.Atoi(account.Uid)
-	if err != nil {
-		return 0, 0, fmt.Errorf("解析用户 UID %q: %w", account.Uid, err)
-	}
-	gid, err := strconv.Atoi(group.Gid)
-	if err != nil {
-		return 0, 0, fmt.Errorf("解析用户组 GID %q: %w", group.Gid, err)
-	}
-	return uid, gid, nil
-}
-
 func ensureDirectory(path string, mode os.FileMode, uid, gid int) error {
 	if err := os.MkdirAll(path, mode); err != nil {
 		return fmt.Errorf("创建目录 %s: %w", path, err)
@@ -792,15 +757,15 @@ func ensureDirectory(path string, mode os.FileMode, uid, gid int) error {
 	return nil
 }
 
-func ensureConfigParent(configPath string, gid int) error {
+func ensureConfigParent(configPath string) error {
 	parent := filepath.Dir(configPath)
 	if parent == defaultConfigDir {
-		return ensureDirectory(parent, 0o750, 0, gid)
+		return ensureDirectory(parent, 0o750, 0, 0)
 	}
 	if pathExists(parent) {
 		return nil
 	}
-	return ensureDirectory(parent, 0o750, 0, gid)
+	return ensureDirectory(parent, 0o750, 0, 0)
 }
 
 func installBinary(source string) error {

@@ -3,7 +3,7 @@
 `xuanyu` 是 [Headscale Console](https://github.com/guanzi008/headscale-console) 的独立部署工具，负责：
 
 - 安装、更新、启动、停止和卸载 systemd 服务。
-- 创建专用系统用户、数据目录和最小权限 systemd unit。
+- 创建数据目录和受限 systemd unit，不创建专用系统用户，服务以 root 运行。
 - 首次安装时生成可直接运行的 `config.yaml`。
 - 查看安装状态、版本、SHA-256 和服务日志。
 
@@ -83,16 +83,9 @@ sudo xuanyu uninstall
 sudo xuanyu uninstall -purge
 ```
 
-`-purge` 不会自动删除系统用户 `headscale-console`，避免误删。确认不需要时可执行：
-
-```bash
-sudo userdel headscale-console
-sudo groupdel headscale-console
-```
-
 ## 安全说明
 
 - 应用默认只监听 `127.0.0.1:8080`，公网入口由 Nginx 终止 TLS。
-- systemd unit 使用独立用户、`ProtectSystem=strict`、`NoNewPrivileges=yes` 等限制。
+- 安装器不会创建专用系统用户；systemd unit 使用 root 运行，并启用 `ProtectSystem=strict`、`NoNewPrivileges=yes` 等限制。
 - `-force-config` 会覆盖配置文件，请先备份。
 - 自定义 `-data-dir`、`-config` 后，后续 `status`、`uninstall` 需要传入相同参数。
