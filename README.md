@@ -9,6 +9,8 @@
 
 `xuanyu` 不安装、不修改、不重载 Nginx。Nginx 由你独立管理；域名、DNS、证书和反向代理配置请参考 [Headscale Console Nginx 文档](https://github.com/guanzi008/headscale-console/blob/main/docs/nginx.md)。
 
+从 v0.1.x 升级至 v0.2.0 前，停止服务并整体备份数据目录。v0.2.0 为每个账号提供独立私有网络；旧共享网络数据保留，但设备需要重新授权到所属账号，并重新检查网络策略。详见 [Console 升级说明](https://github.com/guanzi008/headscale-console#从-v01x-升级)。
+
 ## 构建
 
 ```bash
@@ -19,7 +21,7 @@ make build
 生成自定义版本号：
 
 ```bash
-VERSION=0.1.4 make build
+VERSION=0.2.0 make build
 ```
 
 ## 安装
