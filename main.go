@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const toolVersion = "0.1.1"
+var toolVersion = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

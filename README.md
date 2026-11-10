@@ -16,6 +16,12 @@ make build
 ./dist/xuanyu version
 ```
 
+生成自定义版本号：
+
+```bash
+VERSION=0.1.2 make build
+```
+
 ## 安装
 
 推荐先准备好 DNS 和 TLS 证书，并先把 Nginx 配置好，再启动服务。因为程序启动时会通过自己的 `server.base_url` 访问 `/idp` 做 OIDC discovery，所以该域名必须能从本机正常访问并验证 HTTPS 证书。
