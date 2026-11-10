@@ -78,6 +78,27 @@ func TestResolveBinaryPathMakesRelativePathAbsolute(t *testing.T) {
 	}
 }
 
+func TestVerifyInstalledBinaryChecksVersionAndHash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "headscale-console")
+	const version = "headscale-console 0.1.3 (abc123, built 2026-11-10T00:00:00Z, linux/amd64)"
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' '"+version+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := fileSHA256(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyInstalledBinary(path, version, sha); err != nil {
+		t.Fatalf("expected installed binary to match: %v", err)
+	}
+	if err := verifyInstalledBinary(path, "headscale-console 0.1.4", sha); err == nil {
+		t.Fatal("expected a version mismatch to be rejected")
+	}
+	if err := verifyInstalledBinary(path, version, strings.Repeat("0", 64)); err == nil {
+		t.Fatal("expected a SHA-256 mismatch to be rejected")
+	}
+}
+
 func TestValidateBaseURL(t *testing.T) {
 	for _, valid := range []string{"https://hs.example.com", "http://127.0.0.1:8080"} {
 		if err := validateBaseURL(valid); err != nil {

@@ -19,7 +19,7 @@ make build
 生成自定义版本号：
 
 ```bash
-VERSION=0.1.2 make build
+VERSION=0.1.3 make build
 ```
 
 ## 安装

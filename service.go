@@ -140,9 +140,15 @@ func installCommand(args []string) error {
 	if err := validateInstallOptions(options); err != nil {
 		return err
 	}
-	if err := verifyBinary(options.binaryPath); err != nil {
+	sourceVersion, err := verifyBinary(options.binaryPath)
+	if err != nil {
 		return err
 	}
+	sourceSHA, err := fileSHA256(options.binaryPath)
+	if err != nil {
+		return fmt.Errorf("计算待安装程序 SHA-256: %w", err)
+	}
+	fmt.Printf("待安装程序 SHA-256: %s\n", sourceSHA)
 
 	configYAML := renderConfig(options)
 	unit := renderServiceUnit(options)
@@ -179,6 +185,9 @@ func installCommand(args []string) error {
 		return err
 	}
 	if err := installBinary(options.binaryPath); err != nil {
+		return err
+	}
+	if err := verifyInstalledBinary(installedBinary, sourceVersion, sourceSHA); err != nil {
 		return err
 	}
 
@@ -694,16 +703,16 @@ func resolveBinaryPath(path string) (string, error) {
 	return filepath.Clean(absolute), nil
 }
 
-func verifyBinary(path string) error {
+func verifyBinary(path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("读取二进制 %s: %w", path, err)
+		return "", fmt.Errorf("读取二进制 %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("二进制路径不是普通文件: %s", path)
+		return "", fmt.Errorf("二进制路径不是普通文件: %s", path)
 	}
 	if info.Mode()&0o111 == 0 {
-		return fmt.Errorf("文件不可执行: %s", path)
+		return "", fmt.Errorf("文件不可执行: %s", path)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -713,11 +722,42 @@ func verifyBinary(path string) error {
 		if message == "" {
 			message = err.Error()
 		}
-		return fmt.Errorf("运行 %s --version 失败（架构不匹配或文件损坏）: %s", path, message)
+		return "", fmt.Errorf("运行 %s --version 失败（架构不匹配或文件损坏）: %s", path, message)
 	}
-	fmt.Printf("待安装程序版本: %s", string(output))
-	if !strings.HasSuffix(string(output), "\n") {
-		fmt.Println()
+	version := strings.TrimSpace(string(output))
+	if version == "" {
+		return "", fmt.Errorf("运行 %s --version 未返回版本信息", path)
+	}
+	fmt.Printf("待安装程序版本: %s\n", version)
+	return version, nil
+}
+
+// verifyInstalledBinary checks the bytes that systemd will execute, not just
+// the source file. This catches a stale binary left behind by an interrupted
+// install before the service is restarted.
+func verifyInstalledBinary(path, expectedVersion, expectedSHA string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("安装后运行 %s --version 失败: %s", path, message)
+	}
+	actualVersion := strings.TrimSpace(string(output))
+	actualSHA, err := fileSHA256(path)
+	if err != nil {
+		return fmt.Errorf("计算已安装程序 SHA-256: %w", err)
+	}
+	fmt.Printf("已安装程序版本: %s\n", actualVersion)
+	fmt.Printf("已安装程序 SHA-256: %s\n", actualSHA)
+	if actualVersion != expectedVersion {
+		return fmt.Errorf("安装后版本不一致：期望 %q，实际 %q；请确认安装的是新的 headscale-console 二进制", expectedVersion, actualVersion)
+	}
+	if actualSHA != expectedSHA {
+		return fmt.Errorf("安装后 SHA-256 不一致：源文件可能已被替换，请重新执行安装")
 	}
 	return nil
 }
